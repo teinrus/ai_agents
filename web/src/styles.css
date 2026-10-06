@@ -1,0 +1,221 @@
+:root {
+  color: #1c1915;
+  background: #efe6d6;
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid #1c1915;
+  background: #f7f1e6;
+  padding: 0.45rem 0.8rem;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 1rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+header p {
+  margin: 0.35rem 0 0;
+  max-width: 44rem;
+}
+
+.conversation {
+  flex: 1;
+  overflow-y: auto;
+  margin-top: 1.25rem;
+  padding: 1rem;
+  background: #f7f1e6;
+  border: 1px solid #1c1915;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.bubble {
+  max-width: 78%;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #1c1915;
+  background: #fffdf8;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: #1c1915;
+  color: #f7f1e6;
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+}
+
+.bubble.kind-waiting_confirmation {
+  border-width: 2px;
+}
+
+.bubble.kind-failed,
+.bubble.kind-rejected,
+.bubble.kind-no_role {
+  border-color: #8c1d18;
+}
+
+.bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble-meta {
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.tag,
+h2,
+label span {
+  display: inline-block;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h2 {
+  display: block;
+  margin: 0;
+}
+
+.details {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid #c9bba6;
+  font-size: 0.92rem;
+}
+
+.details .state {
+  font-size: 1.05rem;
+  margin: 0 0 0.3rem;
+}
+
+.details .goal {
+  margin: 0 0 0.3rem;
+}
+
+.muted {
+  color: #6b6155;
+  margin: 0;
+}
+
+.typing {
+  align-self: flex-start;
+  font-style: italic;
+}
+
+section {
+  border-top: 1px solid #c9bba6;
+  padding-top: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+section p,
+section article {
+  margin: 0.3rem 0 0;
+}
+
+ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.actions button:first-child {
+  background: #1c1915;
+  color: #f7f1e6;
+}
+
+.composer {
+  margin-top: 0.75rem;
+}
+
+.composer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+textarea {
+  flex: 1;
+  border: 1px solid #1c1915;
+  background: #fffdf8;
+  padding: 0.55rem 0.65rem;
+  resize: none;
+}
+
+.error {
+  color: #8c1d18;
+  margin: 0 0 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .bubble {
+    max-width: 92%;
+  }
+
+  header h1 {
+    font-size: 1.7rem;
+  }
+}

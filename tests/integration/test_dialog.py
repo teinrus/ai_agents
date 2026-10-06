@@ -1,10 +1,12 @@
 """Приёмная на моках: ответ без прогона, задача, подтверждение через тред."""
 
 import json
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from tests.support.factory import calls, final, make_department
 
+from ai_department.dialog.store import SqliteThreadStore
 from ai_department.domain.errors import ProviderError
 from ai_department.domain.thread import ReplyKind
 from ai_department.llm.port import LlmResponse
@@ -173,6 +175,65 @@ def test_structured_call_decision_is_preferred_over_text() -> None:
     assert answered.messages[-1].text == "из вызова"
 
 
+def test_sqlite_thread_survives_restart_and_drops_lost_run(tmp_path) -> None:
+    path = tmp_path / "threads.db"
+    first, _provider, _clerk = make_department(
+        [
+            intake("dispatch", role_id="clerk", goal="зафиксировать заметку"),
+            calls("commit_note", {"key": "a", "text": "one"}, "c1"),
+        ],
+        threads=SqliteThreadStore(str(path)),
+    )
+    opened = first.reception.open()
+    paused = first.reception.say(opened.thread_id, "зафиксируй a")
+    assert paused.pending is not None
+
+    second, _provider2, _clerk2 = make_department(
+        [
+            intake("dispatch", role_id="clerk", goal="прочитать заметку"),
+            calls("read_note", {"key": "a"}, "c2"),
+            final("прочитано"),
+        ],
+        threads=SqliteThreadStore(str(path)),
+    )
+    viewed = second.reception.view(opened.thread_id)
+    assert viewed.pending is None
+    assert viewed.messages[-1].kind is ReplyKind.FAILED
+    assert "перезапущена" in viewed.messages[-1].text
+    continued = second.reception.say(opened.thread_id, "прочитай a")
+    assert continued.pending is None
+    assert continued.messages[-1].kind is ReplyKind.COMPLETED
+    assert continued.messages[-1].text == "прочитано"
+
+
+def test_thread_list_puts_the_latest_dialog_first() -> None:
+    start = datetime(2026, 10, 6, 10, 0, tzinfo=UTC)
+    ticks = {"n": 0}
+
+    def clock() -> datetime:
+        ticks["n"] += 1
+        return start + timedelta(seconds=ticks["n"])
+
+    department, _provider, _clerk = make_department(
+        [intake("reply", text="ответ по второму диалогу")],
+        clock=clock,
+    )
+    client = TestClient(department.app)
+    first = client.post("/threads").json()["thread_id"]
+    second = client.post("/threads").json()["thread_id"]
+    said = client.post(f"/threads/{second}/messages", json={"text": "вопрос"})
+    assert said.status_code == 200
+
+    listed = client.get("/threads")
+    assert listed.status_code == 200
+    body = listed.json()
+    assert [item["thread_id"] for item in body] == [second, first]
+    assert body[0]["message_count"] == 2
+    assert body[0]["last_text"] == "ответ по второму диалогу"
+    assert body[1]["message_count"] == 0
+    assert body[1]["last_text"] == ""
+
+
 def test_thread_api_covers_open_say_confirm_and_events() -> None:
     department, _provider, clerk = make_department(
         [
@@ -220,3 +281,70 @@ def test_thread_api_covers_open_say_confirm_and_events() -> None:
     assert missing.status_code == 404
     empty = client.post(f"/threads/{thread_id}/messages", json={"text": ""})
     assert empty.status_code == 422
+
+
+def test_thread_survives_restart_and_drops_lost_run(tmp_path: object) -> None:
+    from pathlib import Path
+
+    from ai_department.dialog.store import SqliteThreadStore
+
+    db = Path(str(tmp_path)) / "t.db"
+    department, _provider, _clerk = make_department(
+        [
+            intake("dispatch", role_id="clerk", goal="зафиксировать заметку a"),
+            calls("commit_note", {"key": "a", "text": "текст"}, "c1"),
+        ],
+        threads=SqliteThreadStore(str(db)),
+    )
+    thread = department.reception.open()
+    waiting = department.reception.say(thread.thread_id, "зафиксируй заметку a")
+    assert waiting.messages[-1].kind is ReplyKind.WAITING_CONFIRMATION
+    assert waiting.pending is not None
+    previous = list(waiting.messages)
+
+    restarted, _provider2, _clerk2 = make_department(
+        [
+            intake("dispatch", role_id="clerk", goal="прочитать заметку a"),
+            calls("read_note", {"key": "a"}, "c1"),
+            final("после перезапуска"),
+        ],
+        threads=SqliteThreadStore(str(db)),
+    )
+    viewed = restarted.reception.view(thread.thread_id)
+    assert viewed.pending is None
+    assert viewed.messages[:-1] == previous
+    assert viewed.messages[-1].kind is ReplyKind.FAILED
+    assert viewed.messages[-1].run_id is None
+    assert "Платформа была перезапущена" in viewed.messages[-1].text
+
+    said = restarted.reception.say(thread.thread_id, "что в заметке a?")
+    assert said.pending is None
+    assert said.messages[-1].kind is ReplyKind.COMPLETED
+    assert said.messages[-1].text == "после перезапуска"
+    assert said.run_ids != waiting.run_ids
+
+
+def test_thread_list_api_orders_newest_first() -> None:
+    department, _provider, _clerk = make_department([intake("reply", text="ответ на второе")])
+    client = TestClient(department.app)
+    first = client.post("/threads")
+    second = client.post("/threads")
+    first_id = first.json()["thread_id"]
+    second_id = second.json()["thread_id"]
+    said = client.post(f"/threads/{second_id}/messages", json={"text": "привет"})
+    assert said.status_code == 200
+    listed = client.get("/threads")
+    assert listed.status_code == 200
+    rows = listed.json()
+    assert [row["thread_id"] for row in rows] == [second_id, first_id]
+    assert rows[0]["message_count"] == 2
+    assert rows[0]["last_text"] == "ответ на второе"
+    assert rows[1]["message_count"] == 0
+    assert rows[1]["last_text"] == ""
+    assert set(rows[0]) == {
+        "thread_id",
+        "created_at",
+        "updated_at",
+        "message_count",
+        "last_text",
+    }

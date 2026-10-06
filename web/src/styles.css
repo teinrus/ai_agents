@@ -45,25 +45,156 @@ button.link {
   text-underline-offset: 0.15em;
 }
 
-.chat {
+.shell {
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 1.5rem 1.25rem 1rem;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid #1c1915;
+  flex-shrink: 0;
 }
 
 header h1 {
   margin: 0;
-  font-size: 2.2rem;
+  font-size: 1.8rem;
   font-weight: 600;
   letter-spacing: -0.03em;
 }
 
-header p {
-  margin: 0.35rem 0 0;
-  max-width: 44rem;
+.role-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #1c1915;
+  background: #f7f1e6;
+  padding: 0.15rem 0.45rem;
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
+.role-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.role-dot.idle {
+  background: #2f6b3a;
+}
+
+.role-dot.waiting {
+  background: #c9a227;
+}
+
+.role-dot.active {
+  background: #2c5aa0;
+}
+
+.role-dot.quiet {
+  background: #8a8378;
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border-right: 1px solid #1c1915;
+  background: #f7f1e6;
+  overflow: hidden;
+}
+
+.sidebar-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.sidebar-toolbar button {
+  width: 100%;
+}
+
+.sidebar-toggle {
+  display: none;
+}
+
+.thread-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.thread-item {
+  width: 100%;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+  padding: 0.45rem 0.55rem;
+}
+
+.thread-item[aria-current="true"] {
+  border-color: #1c1915;
+  background: #fffdf8;
+}
+
+.thread-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: #6b6155;
+}
+
+.waiting-mark {
+  font-family: "Consolas", "Courier New", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8c1d18;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 1rem 1.25rem 1rem;
 }
 
 .conversation {
@@ -210,12 +341,44 @@ textarea {
   margin: 0 0 0.5rem;
 }
 
+@media (max-width: 799px) {
+  header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .workspace {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid #1c1915;
+    overflow: visible;
+  }
+
+  .sidebar-toggle {
+    display: block;
+  }
+
+  .thread-nav {
+    display: none;
+    flex: none;
+    max-height: 40vh;
+  }
+
+  .thread-nav.open {
+    display: flex;
+  }
+}
+
 @media (max-width: 640px) {
   .bubble {
     max-width: 92%;
   }
 
   header h1 {
-    font-size: 1.7rem;
+    font-size: 1.5rem;
   }
 }

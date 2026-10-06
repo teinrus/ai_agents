@@ -6,6 +6,26 @@ from tests.support.factory import calls, final, make_department
 from ai_department.domain.errors import ProviderError
 
 
+def test_health_reports_roles_without_secrets_or_model_calls() -> None:
+    department, provider, _clerk = make_department([final("не должно вызываться")])
+    client = TestClient(department.app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["llm_adapter"] == "mock"
+    assert body["threads_backend"] == "memory"
+    assert body["catalog_models"] >= 1
+    assert body["roles"] == [
+        {"role_id": "clerk", "description": body["roles"][0]["description"], "state": "Idle"}
+    ]
+    assert body["roles"][0]["description"]
+    assert provider.calls == []
+    flat = str(body).lower()
+    for forbidden in ("password", "api_key", "reasoner-small", "coder-large"):
+        assert forbidden not in flat
+
+
 def test_api_covers_completion_confirmation_and_missing_role() -> None:
     department, _provider, clerk = make_department(
         [

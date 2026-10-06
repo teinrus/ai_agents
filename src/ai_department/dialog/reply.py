@@ -22,6 +22,12 @@ def compose_reply(snapshot: RunSnapshot) -> ReplyText:
     """Таблица раздела 19.3 контракта."""
     role = snapshot.role_id or "сотрудник"
     if snapshot.status is RunStatus.NO_ROLE:
+        if snapshot.failure_reason == "busy":
+            return ReplyText(
+                ReplyKind.NO_ROLE,
+                "Подходящий сотрудник сейчас занят другой задачей или ждёт решения "
+                "в другом диалоге. Повторите чуть позже.",
+            )
         return ReplyText(ReplyKind.NO_ROLE, "Ни один сотрудник не взял эту задачу.")
     if snapshot.state is EmployeeState.WAITING_CONFIRMATION:
         return ReplyText(ReplyKind.WAITING_CONFIRMATION, _confirmation_text(snapshot, role))

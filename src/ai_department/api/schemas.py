@@ -99,3 +99,32 @@ class ThreadOut(BaseModel):
     messages: list[ThreadMessageOut]
     run_ids: list[str]
     pending: ThreadPendingOut | None
+
+
+class ThreadSummaryOut(BaseModel):
+    """Сводка треда для списка, новые сверху."""
+
+    thread_id: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    last_text: str
+
+
+class RoleHealthOut(BaseModel):
+    """Роль и состояние её сотрудника."""
+
+    role_id: str
+    description: str
+    state: str
+
+
+class HealthOut(BaseModel):
+    """Состояние платформы без секретов и имён моделей провайдера."""
+
+    status: str
+    llm_adapter: str
+    memory_backend: str
+    threads_backend: str
+    catalog_models: int
+    roles: list[RoleHealthOut]

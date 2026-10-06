@@ -4,22 +4,35 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from ai_department.dialog.intake import Dispatch, Intake, IntakeFailure, Reply
 from ai_department.dialog.reply import ReplyText, compose_reply
-from ai_department.domain.errors import ConfirmationError, ThreadNotFound
+from ai_department.dialog.store import ThreadStore
+from ai_department.domain.errors import ConfirmationError, RunNotFound, ThreadNotFound
 from ai_department.domain.events import EventName
 from ai_department.domain.run import RunSnapshot
 from ai_department.domain.states import EmployeeState
 from ai_department.domain.task import Constraints, Task
-from ai_department.domain.thread import ReplyKind, ThreadMessage, ThreadPending, ThreadSnapshot
+from ai_department.domain.thread import (
+    ReplyKind,
+    ThreadMessage,
+    ThreadPending,
+    ThreadRecord,
+    ThreadSnapshot,
+    ThreadSummary,
+)
 from ai_department.events.bus import EventBus, RunLogger
 from ai_department.orchestrator.service import Orchestrator
+
+_LOST_RUN_TEXT = "Платформа была перезапущена, ожидавшееся действие потеряно. Повторите задачу."
 
 
 @dataclass
 class _Thread:
     thread_id: str
+    created_at: str
+    updated_at: str
     messages: list[ThreadMessage] = field(default_factory=list)
     run_ids: list[str] = field(default_factory=list)
     pending_run_id: str | None = None
@@ -36,28 +49,37 @@ class Reception:
         bus: EventBus,
         default_constraints: Constraints,
         ids: Callable[[], str],
+        store: ThreadStore,
+        clock: Callable[[], datetime],
     ) -> None:
         self._orchestrator = orchestrator
         self._intake = intake
         self._bus = bus
         self._constraints = default_constraints
         self._ids = ids
-        self._threads: dict[str, _Thread] = {}
+        self._store = store
+        self._clock = clock
 
     def open(self) -> ThreadSnapshot:
         """Создаёт пустой тред."""
-        thread = _Thread(thread_id=self._ids())
-        self._threads[thread.thread_id] = thread
+        stamp = self._clock().isoformat()
+        thread = _Thread(thread_id=self._ids(), created_at=stamp, updated_at=stamp)
+        self._persist(thread, touch=False)
         return self.view(thread.thread_id)
+
+    def list(self) -> list[ThreadSummary]:
+        """Сводки тредов из хранилища, новые сверху."""
+        return self._store.list()
 
     def view(self, thread_id: str) -> ThreadSnapshot:
         """Снимок треда с ожидающим подтверждением, если оно есть."""
         thread = self._require(thread_id)
+        pending = self._pending(thread)
         return ThreadSnapshot(
             thread_id=thread.thread_id,
             messages=list(thread.messages),
             run_ids=list(thread.run_ids),
-            pending=self._pending(thread),
+            pending=pending,
         )
 
     def say(self, thread_id: str, text: str) -> ThreadSnapshot:
@@ -88,6 +110,7 @@ class Reception:
     def confirm(self, thread_id: str, confirmation_id: str, decision: str) -> ThreadSnapshot:
         """Передаёт approve или reject оркестратору и отвечает по новому снимку."""
         thread = self._require(thread_id)
+        self._waiting_snapshot(thread)
         if thread.pending_run_id is None:
             raise ConfirmationError("Тред не ждёт подтверждения")
         snapshot = self._orchestrator.confirm(thread.pending_run_id, confirmation_id, decision)
@@ -138,14 +161,26 @@ class Reception:
                 "text": reply.text,
             },
         )
+        self._persist(thread)
 
     def _waiting_snapshot(self, thread: _Thread) -> RunSnapshot | None:
         if thread.pending_run_id is None:
             return None
-        snapshot = self._orchestrator.snapshot(thread.pending_run_id)
+        try:
+            snapshot = self._orchestrator.snapshot(thread.pending_run_id)
+        except RunNotFound:
+            thread.pending_run_id = None
+            self._answer(
+                thread,
+                self._log(thread),
+                ReplyText(ReplyKind.FAILED, _LOST_RUN_TEXT),
+                None,
+            )
+            return None
         if snapshot.state is EmployeeState.WAITING_CONFIRMATION:
             return snapshot
         thread.pending_run_id = None
+        self._persist(thread)
         return None
 
     def _pending(self, thread: _Thread) -> ThreadPending | None:
@@ -164,7 +199,28 @@ class Reception:
         return RunLogger(bus=self._bus, run_id="", correlation_id=thread.thread_id)
 
     def _require(self, thread_id: str) -> _Thread:
-        thread = self._threads.get(thread_id)
-        if thread is None:
+        record = self._store.load(thread_id)
+        if record is None:
             raise ThreadNotFound(thread_id)
-        return thread
+        return _Thread(
+            thread_id=record.thread_id,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            messages=list(record.messages),
+            run_ids=list(record.run_ids),
+            pending_run_id=record.pending_run_id,
+        )
+
+    def _persist(self, thread: _Thread, *, touch: bool = True) -> None:
+        if touch:
+            thread.updated_at = self._clock().isoformat()
+        self._store.save(
+            ThreadRecord(
+                thread_id=thread.thread_id,
+                created_at=thread.created_at,
+                updated_at=thread.updated_at,
+                messages=tuple(thread.messages),
+                run_ids=tuple(thread.run_ids),
+                pending_run_id=thread.pending_run_id,
+            )
+        )

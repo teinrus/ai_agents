@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -97,6 +98,15 @@ class Orchestrator:
         self._runs: dict[str, ActiveRun] = {}
         self._sessions: dict[str, AgentSession] = {}
         self._logs: dict[str, RunLogger] = {}
+        self._lock = threading.RLock()
+
+    def staff(self) -> list[tuple[RolePlugin, EmployeeState]]:
+        """Включённые роли с текущим состоянием сотрудника, в порядке реестра."""
+        return [
+            (plugin, self._employees[plugin.role_id].state)
+            for plugin in self._plugins
+            if plugin.role_id not in self._disabled
+        ]
 
     def register(self, plugin: RolePlugin) -> None:
         """Принимает плагин из корня сборки и создаёт сотрудника."""
@@ -128,7 +138,19 @@ class Orchestrator:
         self.move(employee, EmployeeState.RETIRED, "role_disabled", self._platform_log())
 
     def submit(self, task: Task) -> RunSnapshot:
-        """Принимает задачу и ведёт прогон до паузы или терминального статуса."""
+        """Принимает задачу и ведёт прогон до паузы или терминального статуса.
+
+        Задачи процесса идут последовательно: второй вызов ждёт первого.
+        """
+        with self._lock:
+            return self._submit(task)
+
+    def confirm(self, run_id: str, confirmation_id: str, decision: str) -> RunSnapshot:
+        """approve выполняет инструмент, reject передаёт агенту denied."""
+        with self._lock:
+            return self._confirm(run_id, confirmation_id, decision)
+
+    def _submit(self, task: Task) -> RunSnapshot:
         if not task.correlation_id:
             task = replace(task, correlation_id=uuid4().hex)
         run_id = uuid4().hex
@@ -148,11 +170,15 @@ class Orchestrator:
         chosen = self._select(task)
         if chosen is None:
             record.status = RunStatus.NO_ROLE
-            log.emit(
-                EventName.TASK_FINISHED,
-                "Роль не выбрана",
-                {"status": RunStatus.NO_ROLE.value, "steps": 0, "revisions": 0},
-            )
+            finish: dict[str, object] = {
+                "status": RunStatus.NO_ROLE.value,
+                "steps": 0,
+                "revisions": 0,
+            }
+            if self._busy_candidate(task):
+                record.failure_reason = "busy"
+                finish["reason"] = "busy"
+            log.emit(EventName.TASK_FINISHED, "Роль не выбрана", finish)
             return self.snapshot(run_id)
         plugin, score, rejected = chosen
         record.role_id = plugin.role_id
@@ -186,8 +212,7 @@ class Orchestrator:
         self._drive(record, session, log)
         return self.snapshot(run_id)
 
-    def confirm(self, run_id: str, confirmation_id: str, decision: str) -> RunSnapshot:
-        """approve выполняет инструмент, reject передаёт агенту denied."""
+    def _confirm(self, run_id: str, confirmation_id: str, decision: str) -> RunSnapshot:
         record = self._require(run_id)
         session = self._sessions.get(run_id)
         log = self._logs.get(run_id)
@@ -392,6 +417,19 @@ class Orchestrator:
             if plugin.role_id != chosen.role_id
         ]
         return chosen, chosen_score, rejected
+
+    def _busy_candidate(self, task: Task) -> bool:
+        """Есть роль, которая взяла бы порог, но её сотрудник сейчас не в Idle."""
+        for plugin in self._plugins:
+            if plugin.role_id in self._disabled:
+                continue
+            employee = self._employees.get(plugin.role_id)
+            if employee is None or employee.state is EmployeeState.IDLE:
+                continue
+            score = _score(plugin.score(task))
+            if score is not None and score >= self._role_threshold:
+                return True
+        return False
 
     def _expired(self, task: Task) -> bool:
         deadline = task.constraints.deadline

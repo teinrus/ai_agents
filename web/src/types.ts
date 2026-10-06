@@ -43,3 +43,26 @@ export type Thread = {
   run_ids: string[];
   pending: ThreadPending | null;
 };
+
+export type ThreadSummary = {
+  thread_id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_text: string;
+};
+
+export type RoleHealth = {
+  role_id: string;
+  description: string;
+  state: string;
+};
+
+export type Health = {
+  status: string;
+  llm_adapter: string;
+  memory_backend: string;
+  threads_backend: string;
+  catalog_models: number;
+  roles: RoleHealth[];
+};

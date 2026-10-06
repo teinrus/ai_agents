@@ -8,9 +8,44 @@ from ai_department.dialog.reception import Reception
 from ai_department.domain.events import Envelope, envelope_dict
 from ai_department.domain.run import RunSnapshot
 from ai_department.domain.task import ConstraintInput, Task, resolve_constraints
-from ai_department.domain.thread import ThreadSnapshot
+from ai_department.domain.thread import ThreadSnapshot, ThreadSummary
+from ai_department.llm.catalog import ModelCatalog
 from ai_department.observability.feed import RunFeed, ThreadFeed
 from ai_department.orchestrator.service import Orchestrator
+
+EventList = list[Envelope]
+
+
+class HealthApi:
+    """Состояние платформы: адаптеры, роли, сотрудники. Модель и инструменты не трогает."""
+
+    def __init__(
+        self,
+        orchestrator: Orchestrator,
+        catalog: ModelCatalog,
+        *,
+        llm_adapter: str,
+        memory_backend: str,
+        threads_backend: str,
+    ) -> None:
+        self._orchestrator = orchestrator
+        self._catalog = catalog
+        self._llm_adapter = llm_adapter
+        self._memory_backend = memory_backend
+        self._threads_backend = threads_backend
+
+    def read(self) -> dict[str, object]:
+        return {
+            "status": "ok",
+            "llm_adapter": self._llm_adapter,
+            "memory_backend": self._memory_backend,
+            "threads_backend": self._threads_backend,
+            "catalog_models": len(self._catalog.list()),
+            "roles": [
+                {"role_id": plugin.role_id, "description": plugin.description, "state": state.value}
+                for plugin, state in self._orchestrator.staff()
+            ],
+        }
 
 
 class RunApi:
@@ -83,6 +118,9 @@ class ThreadApi:
     def open(self) -> ThreadSnapshot:
         return self._reception.open()
 
+    def list(self) -> list[ThreadSummary]:
+        return self._reception.list()
+
     def get_thread(self, thread_id: str) -> ThreadSnapshot:
         return self._reception.view(thread_id)
 
@@ -92,7 +130,7 @@ class ThreadApi:
     def confirm(self, thread_id: str, confirmation_id: str, decision: str) -> ThreadSnapshot:
         return self._reception.confirm(thread_id, confirmation_id, decision)
 
-    def get_events(self, thread_id: str) -> list[Envelope]:
+    def get_events(self, thread_id: str) -> EventList:
         self._reception.view(thread_id)
         return self._feed.list(thread_id)
 

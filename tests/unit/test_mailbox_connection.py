@@ -33,6 +33,16 @@ class _FakeImap:
         del message_id, spec
         return ("OK", [(b"1 (BODY[] {n}", self._raw), b")"])
 
+    def uid(self, command: str, *args: object) -> tuple[str, list[object]]:
+        if command.lower() == "search":
+            criteria = str(args[-1]) if args else "UNSEEN"
+            return self.search(None, criteria)
+        if command.lower() == "fetch":
+            message_id = str(args[0]) if args else ""
+            spec = str(args[1]) if len(args) > 1 else ""
+            return self.fetch(message_id, spec)
+        return ("NO", [])
+
     def logout(self) -> str:
         return "BYE"
 
@@ -105,3 +115,74 @@ def test_auth_failure_is_not_retried_and_hides_password() -> None:
         mailbox.list_unread(5)
     assert slept == []
     assert _PASSWORD not in str(caught.value)
+
+
+class _RecordingImap(_FakeImap):
+    def __init__(self, raw: bytes, *, partial: bytes | None) -> None:
+        super().__init__(raw)
+        self.uid_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.fetch_calls: list[tuple[str, str]] = []
+        self._partial = partial
+
+    def fetch(self, message_id: str, spec: str) -> tuple[str, list[object]]:
+        self.fetch_calls.append((message_id, spec))
+        return ("OK", [(b"1 (BODY[] {n}", self._raw), b")"])
+
+    def uid(self, command: str, *args: object) -> tuple[str, list[object]]:
+        self.uid_calls.append((command, args))
+        if command.lower() != "fetch":
+            return super().uid(command, *args)
+        if self._partial is None:
+            return ("OK", [])
+        return ("OK", [(b"1 (BODY[]<0> {n}", self._partial), b")"])
+
+
+def test_list_unread_uses_partial_uid_fetch() -> None:
+    raw = _letter()
+    client = _RecordingImap(raw, partial=raw)
+
+    def connector(host: str, port: int, timeout: float) -> imaplib.IMAP4_SSL:
+        del host, port, timeout
+        return cast(imaplib.IMAP4_SSL, client)
+
+    found = ImapSmtpMailbox(_env(), connector=connector).list_unread(5)
+    assert found[0]["subject"] == "Тема живая"
+    assert client.uid_calls == [("fetch", ("1", "(BODY.PEEK[]<0.16384>)"))]
+    assert client.fetch_calls == []
+
+
+def test_list_unread_falls_back_to_full_peek_when_partial_empty() -> None:
+    raw = _letter()
+    client = _RecordingImap(raw, partial=None)
+
+    def connector(host: str, port: int, timeout: float) -> imaplib.IMAP4_SSL:
+        del host, port, timeout
+        return cast(imaplib.IMAP4_SSL, client)
+
+    found = ImapSmtpMailbox(_env(), connector=connector).list_unread(5)
+    assert found[0]["subject"] == "Тема живая"
+    assert client.uid_calls == [("fetch", ("1", "(BODY.PEEK[]<0.16384>)"))]
+    assert client.fetch_calls == [("1", "(BODY.PEEK[])")]
+
+
+def test_list_unread_takes_newest_search_ids() -> None:
+    raw = _letter()
+    fetched: list[str] = []
+
+    class _Newest(_FakeImap):
+        def search(self, charset: str | None, criteria: str) -> tuple[str, list[bytes]]:
+            del charset, criteria
+            return ("OK", [b"10 11 12 13"])
+
+        def uid(self, command: str, *args: object) -> tuple[str, list[object]]:
+            if command.lower() == "fetch":
+                fetched.append(str(args[0]))
+            return super().uid(command, *args)
+
+    def connector(host: str, port: int, timeout: float) -> imaplib.IMAP4_SSL:
+        del host, port, timeout
+        return cast(imaplib.IMAP4_SSL, _Newest(raw))
+
+    found = ImapSmtpMailbox(_env(), connector=connector).list_unread(2)
+    assert fetched == ["12", "13"]
+    assert [item["id"] for item in found] == ["12", "13"]

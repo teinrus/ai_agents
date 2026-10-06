@@ -37,6 +37,8 @@ class PlatformConfig:
     broker_path: str | None = None
     shared_path: str = "data/shared"
     dialog_history_limit: int = 12
+    threads_backend: str = "memory"
+    threads_sqlite_path: str = "data/threads.db"
 
 
 def load_config(environ: Mapping[str, str] | None = None) -> PlatformConfig:
@@ -56,6 +58,9 @@ def load_config(environ: Mapping[str, str] | None = None) -> PlatformConfig:
         raise ConfigError(
             "MODEL_CATALOG_SOURCE", "MODEL_CATALOG_SOURCE должен быть startup или live"
         )
+    threads_backend = env.get("THREADS_BACKEND", "memory")
+    if threads_backend not in {"memory", "sqlite"}:
+        raise ConfigError("THREADS_BACKEND", "THREADS_BACKEND должен быть memory или sqlite")
     roles = tuple(part.strip() for part in env.get("ENABLED_ROLES", "").split(",") if part.strip())
     catalog = env.get("MODEL_CATALOG_PATH") or None
     return PlatformConfig(
@@ -82,6 +87,8 @@ def load_config(environ: Mapping[str, str] | None = None) -> PlatformConfig:
         broker_path=env.get("BROKER_PATH") or None,
         shared_path=env.get("MEMORY_SHARED_PATH", "data/shared"),
         dialog_history_limit=_integer(env, "PLATFORM_DIALOG_HISTORY_LIMIT", 12),
+        threads_backend=threads_backend,
+        threads_sqlite_path=env.get("THREADS_SQLITE_PATH", "data/threads.db"),
     )
 
 

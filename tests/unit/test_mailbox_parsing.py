@@ -160,3 +160,69 @@ def test_outgoing_message_carries_date_message_id_and_threading() -> None:
     assert message["References"] == "<abc@x>"
     plain = _message("me", "you@example.com", "s", "b")
     assert plain["Message-ID"].startswith("<") and plain["In-Reply-To"] is None
+
+
+def test_truncated_base64_body_does_not_pollute_snippet() -> None:
+    message = EmailMessage()
+    message["From"] = "a@b.c"
+    message["Subject"] = "b64"
+    message["Date"] = "Tue, 6 Oct 2026 21:00:00 +0300"
+    message.set_content("длинный русский текст ..." * 50, cte="base64")
+    raw = message.as_bytes()
+    header_end = raw.find(b"\n\n")
+    truncated = raw[: header_end + 2 + 21]
+    summary = parse_summary("12", truncated)
+    snippet = str(summary["snippet"])
+    assert summary["from"] == "a@b.c"
+    assert summary["subject"] == "b64"
+    assert summary["date"]
+    assert snippet == ""
+    assert "0LTQ" not in snippet
+
+
+def test_truncated_html_snippet_survives_unclosed_tags() -> None:
+    message = EmailMessage()
+    message["From"] = "a@b.c"
+    message["Subject"] = "html"
+    message["Date"] = "Tue, 6 Oct 2026 21:00:00 +0300"
+    message.set_content("<html><body><p>Привет, коллеги и ещё текст</p>", subtype="html")
+    raw = message.as_bytes()
+    cut = raw.find("Привет, коллеги".encode()) + len("Привет, коллеги".encode())
+    truncated = raw[:cut]
+    summary = parse_summary("13", truncated)
+    snippet = str(summary["snippet"])
+    assert summary["subject"] == "html"
+    assert "Привет" in snippet
+    assert "<" not in snippet
+    assert "html>" not in snippet
+
+
+def test_truncated_multipart_uses_first_part() -> None:
+    message = EmailMessage()
+    message["From"] = "a@b.c"
+    message["Subject"] = "mix"
+    message["Date"] = "Tue, 6 Oct 2026 21:00:00 +0300"
+    message.set_content("видимый plain")
+    message.add_alternative("<p>" + ("html скрытый " * 40) + "</p>", subtype="html")
+    raw = message.as_bytes()
+    second = raw.find(b"text/html")
+    truncated = raw[: second + 24]
+    summary = parse_summary("14", truncated)
+    snippet = str(summary["snippet"])
+    assert "видимый plain" in snippet
+    assert "html скрытый" not in snippet
+
+
+def test_headers_without_body_give_empty_snippet() -> None:
+    message = EmailMessage()
+    message["From"] = "Иван Петров <ivan@example.com>"
+    message["Subject"] = "Только заголовки"
+    message["Date"] = "Tue, 6 Oct 2026 21:00:00 +0300"
+    message.set_content("будет отрезано")
+    raw = message.as_bytes()
+    truncated = raw[: raw.find(b"\n\n") + 2]
+    summary = parse_summary("15", truncated)
+    assert summary["from"] == "Иван Петров <ivan@example.com>"
+    assert summary["subject"] == "Только заголовки"
+    assert summary["date"]
+    assert summary["snippet"] == ""

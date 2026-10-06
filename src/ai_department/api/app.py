@@ -6,14 +6,17 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ai_department.api.schemas import (
     ConfirmationIn,
+    HealthOut,
     MessageIn,
     RunOut,
     TaskCreated,
     TaskIn,
     ThreadCreated,
     ThreadOut,
+    ThreadSummaryOut,
 )
 from ai_department.api.service import (
+    HealthApi,
     RunApi,
     ThreadApi,
     event_payloads,
@@ -31,6 +34,15 @@ from ai_department.domain.errors import (
 def build_router() -> APIRouter:
     """Собирает маршруты без знания ролей."""
     router = APIRouter()
+
+    @router.get("/health", response_model=HealthOut)
+    def read_health(request: Request) -> HealthOut:
+        api = getattr(request.app.state, "health", None)
+        if not isinstance(api, HealthApi):
+            raise HTTPException(
+                status_code=500, detail={"kind": "runtime", "message": "Состояние не собрано"}
+            )
+        return HealthOut.model_validate(api.read())
 
     @router.post("/tasks", status_code=201, response_model=TaskCreated)
     def create_task(body: TaskIn, request: Request) -> TaskCreated:
@@ -89,6 +101,19 @@ def build_router() -> APIRouter:
     def open_thread(request: Request) -> ThreadCreated:
         snapshot = _threads(request).open()
         return ThreadCreated(thread_id=snapshot.thread_id)
+
+    @router.get("/threads", response_model=list[ThreadSummaryOut])
+    def list_threads(request: Request) -> list[ThreadSummaryOut]:
+        return [
+            ThreadSummaryOut(
+                thread_id=item.thread_id,
+                created_at=item.created_at,
+                updated_at=item.updated_at,
+                message_count=item.message_count,
+                last_text=item.last_text,
+            )
+            for item in _threads(request).list()
+        ]
 
     @router.get("/threads/{thread_id}", response_model=ThreadOut)
     def read_thread(thread_id: str, request: Request) -> ThreadOut:

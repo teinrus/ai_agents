@@ -1,4 +1,11 @@
-import type { Envelope, Run, Thread } from "./types";
+import type { Envelope, Health, Run, Thread, ThreadSummary } from "./types";
+
+export class NotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotFoundError";
+  }
+}
 
 export async function openThread(): Promise<string> {
   const response = await fetch("/threads", { method: "POST" });
@@ -11,10 +18,42 @@ export async function openThread(): Promise<string> {
 
 export async function readThread(threadId: string): Promise<Thread> {
   const response = await fetch(`/threads/${threadId}`);
+  if (response.status === 404) {
+    throw new NotFoundError(await errorText(response));
+  }
   if (!response.ok) {
     throw new Error(await errorText(response));
   }
   return (await response.json()) as Thread;
+}
+
+export async function listThreads(): Promise<ThreadSummary[]> {
+  try {
+    const response = await fetch("/threads");
+    if (!response.ok) {
+      return [];
+    }
+    const body: unknown = await response.json();
+    return Array.isArray(body) ? (body as ThreadSummary[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function readHealth(): Promise<Health | null> {
+  try {
+    const response = await fetch("/health");
+    if (!response.ok) {
+      return null;
+    }
+    const body: unknown = await response.json();
+    if (typeof body !== "object" || body === null || Array.isArray(body)) {
+      return null;
+    }
+    return body as Health;
+  } catch {
+    return null;
+  }
 }
 
 export async function sendMessage(threadId: string, text: string): Promise<Thread> {

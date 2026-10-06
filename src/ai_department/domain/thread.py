@@ -46,3 +46,26 @@ class ThreadSnapshot:
     messages: list[ThreadMessage] = field(default_factory=list)
     run_ids: list[str] = field(default_factory=list)
     pending: ThreadPending | None = None
+
+
+@dataclass(frozen=True)
+class ThreadRecord:
+    """Сохраняемое состояние треда. Времена — ISO-8601 в UTC."""
+
+    thread_id: str
+    created_at: str
+    updated_at: str
+    messages: tuple[ThreadMessage, ...]
+    run_ids: tuple[str, ...]
+    pending_run_id: str | None
+
+
+@dataclass(frozen=True)
+class ThreadSummary:
+    """Сводка треда для списка. last_text не длиннее 120 символов."""
+
+    thread_id: str
+    created_at: str
+    updated_at: str
+    message_count: int
+    last_text: str

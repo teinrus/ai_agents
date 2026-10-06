@@ -64,13 +64,15 @@ IMAP_PASSWORD=<пароль приложения>
 SMTP_HOST=smtp.yandex.ru
 ```
 
-Секреты только через окружение или `.env`; `.env` в репозиторий не входит. Что умеет почтовый сотрудник и как это проверялось на живом ящике — в [`docs/mail-role.md`](docs/mail-role.md).
+Секреты только через окружение или `.env`; `.env` в репозиторий не входит. Диалоги по умолчанию живут в памяти процесса. Чтобы пережить перезапуск, задайте `THREADS_BACKEND=sqlite` и при необходимости `THREADS_SQLITE_PATH=data/threads.db`. Что умеет почтовый сотрудник и как это проверялось на живом ящике — в [`docs/mail-role.md`](docs/mail-role.md).
 
 ## HTTP API
 
 | Метод | Путь | Смысл |
 | --- | --- | --- |
+| `GET` | `/health` | Адаптеры, число моделей каталога, роли и состояния сотрудников. Секретов нет |
 | `POST` | `/threads` | Открыть тред |
+| `GET` | `/threads` | Список диалогов: новые сверху, без тел сообщений |
 | `GET` | `/threads/{thread_id}` | Сообщения, прогоны, ожидающее подтверждение |
 | `POST` | `/threads/{thread_id}/messages` | Написать в тред, получить ответ приёмной |
 | `POST` | `/threads/{thread_id}/confirmations` | `approve` или `reject` ожидающего действия |
@@ -99,8 +101,31 @@ src/roles/<role_id>/  плагины ролей: mail, records, clerk (тест�
 tests/unit            чистые решения: политика, роутер, оценщик, разбор
 tests/integration     прогоны на моках через оркестратор и API
 web/                  панель на React + Vite
+Dockerfile            образ: панель и API
+Makefile              цели install, check, run, docker
 .cursor/              методология разработки для Cursor (не runtime)
 ```
+
+## Запуск в Docker и через make
+
+Локально через make:
+
+```bash
+make install
+make web-build
+make run
+```
+
+Проверки: `make check` (ruff, mypy, pytest).
+
+Контейнер:
+
+```bash
+docker build -t ai-department .
+docker run --rm -p 8000:8000 --env-file .env ai-department
+```
+
+В контейнере сервер слушает `0.0.0.0:8000`. Данные (SQLite, журнал событий) живут в томе `/app/data` — в `.env` указывайте пути внутри `data/`. Для постоянного тома: `make docker-run` (монтирует `ai-department-data` в `/app/data`).
 
 ## Разработка
 

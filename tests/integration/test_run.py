@@ -87,6 +87,53 @@ def test_repeat_act_requires_a_new_confirmation() -> None:
     assert clerk.committed == ["a", "a"]
 
 
+def test_busy_employee_gives_no_role_with_busy_reason() -> None:
+    department, _provider, _clerk = make_department(
+        [calls("commit_note", {"key": "a", "text": "one"}, "c1"), final("после")]
+    )
+    paused = department.orchestrator.submit(task())
+    assert paused.state is EmployeeState.WAITING_CONFIRMATION
+    second = department.orchestrator.submit(task(goal="вторая"))
+    assert second.status is RunStatus.NO_ROLE
+    assert second.failure_reason == "busy"
+    finished = [
+        event
+        for event in department.feed.list(second.run_id)
+        if event.event == EventName.TASK_FINISHED.value
+    ]
+    assert finished[0].payload["reason"] == "busy"
+    unrelated = department.orchestrator.submit(task(role=None, payload={}))
+    assert unrelated.status is RunStatus.NO_ROLE
+    assert unrelated.failure_reason is None
+
+
+def test_concurrent_submits_are_serialized() -> None:
+    import threading
+
+    department, _provider, _clerk = make_department(
+        [
+            calls("read_note", {"key": "a"}, "c1"),
+            final("первый"),
+            calls("read_note", {"key": "a"}, "c2"),
+            final("второй"),
+        ]
+    )
+    results: list[RunStatus | None] = []
+    barrier = threading.Barrier(2)
+
+    def worker() -> None:
+        barrier.wait()
+        results.append(department.orchestrator.submit(task()).status)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for item in threads:
+        item.start()
+    for item in threads:
+        item.join()
+    assert results == [RunStatus.COMPLETED, RunStatus.COMPLETED]
+    assert department.orchestrator.staff()[0][1] is EmployeeState.IDLE
+
+
 def test_tool_evidence_sends_storytelling_to_revision() -> None:
     department, provider, _clerk = make_department(
         [final("всё сделано"), calls("read_note", {"key": "a"}, "c1"), final("теперь правда")]

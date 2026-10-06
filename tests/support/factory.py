@@ -8,6 +8,7 @@ from datetime import datetime
 
 from ai_department.composition import Department, assemble
 from ai_department.config import PlatformConfig
+from ai_department.dialog.store import ThreadStore
 from ai_department.domain.evaluation import Verdict
 from ai_department.domain.role import RolePlugin
 from ai_department.domain.task import ConstraintInput, Task, resolve_constraints
@@ -29,6 +30,7 @@ def make_department(
     clock: Callable[[], datetime] | None = None,
     config: PlatformConfig | None = None,
     memory: MockMemory | None = None,
+    threads: ThreadStore | None = None,
 ) -> tuple[Department, MockLlmProvider, ClerkRole]:
     """Платформа с ролью clerk и очередью ответов модели."""
     clerk = build_clerk_role()
@@ -43,6 +45,7 @@ def make_department(
         memory=memory or MockMemory(),
         clock=clock,
         include_stdout=False,
+        threads=threads,
     )
     return department, provider, clerk
 

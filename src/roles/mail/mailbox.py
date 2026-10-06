@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import binascii
 import email
 import email.policy
 import html
@@ -21,10 +22,18 @@ ImapConnector = Callable[[str, int, float], imaplib.IMAP4_SSL]
 
 _SNIPPET_LIMIT = 200
 _TEXT_LIMIT = 4000
+_LIST_FETCH_BYTES = 16_384
+_LIST_PEEK_SPEC = f"(BODY.PEEK[]<0.{_LIST_FETCH_BYTES}>)"
 _BLOCK_DROP = re.compile(
     r"<!--.*?-->|<(style|script|head)\b[^>]*>.*?</\1>",
     re.IGNORECASE | re.DOTALL,
 )
+_UNCLOSED_BLOCK = re.compile(
+    r"<(style|script|head)\b[^>]*>.*",
+    re.IGNORECASE | re.DOTALL,
+)
+_TRAILING_TAG = re.compile(r"<[^>]*$")
+_BASE64ISH = re.compile(r"^[A-Za-z0-9+/=\s]+$")
 _BREAK_TO_NEWLINE = re.compile(
     r"<br\s*/?>|</p>|</div>|</tr>|</li>|</h[1-6]>|</td>",
     re.IGNORECASE,
@@ -135,10 +144,12 @@ class ImapSmtpMailbox:
             status, data = client.search(None, "UNSEEN")
             if status != "OK" or not data or not isinstance(data[0], bytes):
                 return []
+            if limit <= 0:
+                return []
             found: list[dict[str, object]] = []
-            for raw_id in data[0].split()[:limit]:
+            for raw_id in data[0].split()[-limit:]:
                 message_id = raw_id.decode("ascii", errors="ignore")
-                raw = self._peek(client, message_id)
+                raw = self._peek_head(client, message_id)
                 if not raw:
                     continue
                 found.append(parse_summary(message_id, raw))
@@ -220,6 +231,20 @@ class ImapSmtpMailbox:
         if last is None:
             raise RuntimeError("Не удалось открыть IMAP")
         raise last
+
+    def _peek_head(self, client: imaplib.IMAP4_SSL, message_id: str) -> bytes:
+        if not message_id:
+            return b""
+        try:
+            status, data = client.uid("fetch", message_id, _LIST_PEEK_SPEC)
+        except imaplib.IMAP4.error:
+            return self._peek(client, message_id)
+        if status != "OK":
+            return self._peek(client, message_id)
+        raw = _raw_from_fetch(data)
+        if not raw:
+            return self._peek(client, message_id)
+        return raw
 
     def _peek(self, client: imaplib.IMAP4_SSL, message_id: str) -> bytes:
         if not message_id:
@@ -330,24 +355,59 @@ def _part_as_text(part: Message) -> str:
 
 
 def _decode_payload(part: Message) -> str:
-    payload = part.get_payload(decode=True)
+    try:
+        payload = part.get_payload(decode=True)
+    except (ValueError, binascii.Error):
+        return ""
     if payload is None:
         raw = part.get_payload()
-        return raw if isinstance(raw, str) else ""
+        return raw if isinstance(raw, str) and _is_readable_text(raw) else ""
     if not isinstance(payload, bytes):
-        return str(payload)
+        text = str(payload)
+        return text if _is_readable_text(text) else ""
     charset = part.get_content_charset() or "utf-8"
     try:
-        return payload.decode(charset, errors="replace")
+        text = payload.decode(charset)
     except LookupError:
-        return payload.decode("utf-8", errors="replace")
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    except UnicodeDecodeError:
+        return ""
+    return text if _is_readable_text(text) else ""
+
+
+def _is_readable_text(source: str) -> bool:
+    if not source:
+        return True
+    if "\ufffd" in source:
+        return False
+    for char in source:
+        code = ord(char)
+        if code < 32 and char not in "\t\n\r":
+            return False
+    compact = "".join(source.split())
+    if not compact:
+        return True
+    if _BASE64ISH.fullmatch(source) is None:
+        return True
+    has_digit = any(char.isdigit() for char in compact)
+    has_b64_mark = "+" in compact or "/" in compact or compact.endswith("=")
+    if has_b64_mark or (has_digit and " " not in source.strip() and "\n" not in source):
+        return False
+    if len(compact) >= 32:
+        return False
+    return True
 
 
 def _html_to_text(source: str) -> str:
     """HTML в читаемый текст: без CSS/скриптов, с абзацами по блочным тегам."""
     without_blocks = _BLOCK_DROP.sub("", source)
+    without_blocks = _UNCLOSED_BLOCK.sub("", without_blocks)
     with_breaks = _BREAK_TO_NEWLINE.sub("\n", without_blocks)
     without_tags = _HTML_TAG.sub("", with_breaks)
+    without_tags = _TRAILING_TAG.sub("", without_tags)
     return _normalize_text(html.unescape(without_tags))
 
 
@@ -391,8 +451,11 @@ def _raw_from_fetch(payload: object) -> bytes:
     if not isinstance(payload, list):
         return b""
     for item in payload:
-        if isinstance(item, tuple) and len(item) > 1 and isinstance(item[1], bytes):
-            return item[1]
+        if not isinstance(item, tuple):
+            continue
+        for part in item[1:]:
+            if isinstance(part, bytes):
+                return part
     return b""
 
 

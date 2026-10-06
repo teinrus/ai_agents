@@ -11,10 +11,11 @@ from typing import cast
 from fastapi import FastAPI
 
 from ai_department.api.app import build_router
-from ai_department.api.service import RunApi, ThreadApi
+from ai_department.api.service import HealthApi, RunApi, ThreadApi
 from ai_department.config import PlatformConfig, load_config, require_cloud_llm, require_local_llm
 from ai_department.dialog.intake import Intake, RoleCard
 from ai_department.dialog.reception import Reception
+from ai_department.dialog.store import InMemoryThreadStore, SqliteThreadStore, ThreadStore
 from ai_department.domain.errors import ConfigError
 from ai_department.domain.role import RolePlugin
 from ai_department.domain.task import ConstraintInput, resolve_constraints
@@ -77,6 +78,7 @@ def assemble(
     include_stdout: bool = False,
     ids: Callable[[], str] | None = None,
     broker_path: str | None = None,
+    threads: ThreadStore | None = None,
 ) -> Department:
     """Собирает ядро на уже выбранных адаптерах. Роут адаптер не создаёт."""
     now = _now if clock is None else clock
@@ -140,10 +142,19 @@ def assemble(
             max_revisions=config.max_revisions_max,
         ),
         ids=_new_id if ids is None else ids,
+        store=InMemoryThreadStore() if threads is None else threads,
+        clock=now,
     )
     app = FastAPI(title="AI Department")
     app.state.api = api
     app.state.threads = ThreadApi(reception, thread_feed)
+    app.state.health = HealthApi(
+        orchestrator,
+        catalog,
+        llm_adapter=config.llm_adapter,
+        memory_backend=config.memory_backend,
+        threads_backend=config.threads_backend,
+    )
     app.include_router(build_router())
     return Department(
         config=config,
@@ -200,6 +211,11 @@ def build_from_environment(environ: Mapping[str, str] | None = None) -> Departme
         memory = SharedDirectoryStore(config.shared_path)
     else:
         memory = InMemoryStore()
+    thread_store: ThreadStore
+    if config.threads_backend == "sqlite":
+        thread_store = SqliteThreadStore(config.threads_sqlite_path)
+    else:
+        thread_store = InMemoryThreadStore()
     plugins = [_load_role(role_id, env) for role_id in config.enabled_roles]
     return assemble(
         config=config,
@@ -211,6 +227,7 @@ def build_from_environment(environ: Mapping[str, str] | None = None) -> Departme
         memory=memory,
         include_stdout=True,
         broker_path=config.broker_path,
+        threads=thread_store,
     )
 
 
